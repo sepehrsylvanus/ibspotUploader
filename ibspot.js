@@ -141,11 +141,10 @@ async function uploadFirstProduct() {
 
     // Set Available On (2 days before today)
     console.log("Setting Available On date...");
-    // First try the hidden input
     let dateFieldFound = false;
     try {
       await page.waitForSelector("#product_available_on", {
-        timeout: 10000, // Shorter timeout to fail faster
+        timeout: 10000,
       });
       dateFieldFound = true;
       console.log("Found #product_available_on");
@@ -155,7 +154,6 @@ async function uploadFirstProduct() {
       );
     }
 
-    // Fallback to visible input if hidden one isn’t found
     if (!dateFieldFound) {
       await page.waitForSelector(".flatpickr-alt-input", {
         visible: true,
@@ -164,7 +162,6 @@ async function uploadFirstProduct() {
       console.log("Found .flatpickr-alt-input");
     }
 
-    // Calculate date 2 days ago
     const today = new Date();
     today.setDate(today.getDate() - 2);
     const year = today.getFullYear();
@@ -172,11 +169,9 @@ async function uploadFirstProduct() {
     const day = String(today.getDate()).padStart(2, "0");
     const dateString = `${year}-${month}-${day}`;
 
-    // Click the visible input to open the calendar
     await page.click(".flatpickr-alt-input");
-    await delay(500); // Wait for the calendar to appear
+    await delay(500);
 
-    // Select the exact date from the calendar
     const monthNames = [
       "January",
       "February",
@@ -218,7 +213,6 @@ async function uploadFirstProduct() {
       }
     }
 
-    // Verify the date
     const enteredDateValue = await page.$eval(
       dateFieldFound ? "#product_available_on" : ".flatpickr-alt-input",
       (el) => el.value
@@ -237,11 +231,9 @@ async function uploadFirstProduct() {
       timeout: 30000,
     });
 
-    // Open the Select2 dropdown
     await page.click("#select2-product_shipping_category_id-container");
-    await delay(500); // Wait for dropdown to appear
+    await delay(500);
 
-    // Click the specific option by text content
     const targetOptionSelector = `.select2-results__option:contains("Public - TR to US by Weight")`;
     try {
       await page.waitForSelector(targetOptionSelector, {
@@ -255,10 +247,8 @@ async function uploadFirstProduct() {
       await page.select("#product_shipping_category_id", "5698");
     }
 
-    // Wait for Select2 to update
     await delay(500);
 
-    // Verify the selection
     const selectedShipping = await page.$eval(
       "#select2-product_shipping_category_id-container",
       (el) => el.getAttribute("title")
@@ -271,7 +261,27 @@ async function uploadFirstProduct() {
       console.log("Error: Failed to set Shipping Category");
     }
 
-    console.log("All fields entered. Check the browser and logs for details.");
+    // Click the Create button and wait for navigation
+    console.log("Attempting to click Create button...");
+    await page.waitForSelector('button.btn.btn-success[type="submit"]', {
+      visible: true,
+      timeout: 30000,
+    });
+
+    await Promise.all([
+      page.click('button.btn.btn-success[type="submit"]'),
+      page.waitForNavigation({ waitUntil: "networkidle2" }),
+    ]);
+
+    console.log("Create button clicked successfully");
+
+    // Get and log the new URL after submission
+    const newPageUrl = await page.url();
+    console.log(`Navigated to new page: ${newPageUrl}`);
+
+    console.log(
+      "Product creation completed. Check the browser and logs for details."
+    );
   } catch (error) {
     console.error("Error:", error.message);
   } finally {
