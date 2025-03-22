@@ -85,8 +85,8 @@ function generateRandomProduct() {
   };
 }
 
-// Reads product from JSON with fallback to random product
-async function getProductFromJson(jsonFilePath) {
+// Gets product at specific index from JSON with fallback to random product
+async function getProductFromJson(jsonFilePath, index) {
   try {
     const jsonData = await fsPromises.readFile(jsonFilePath, "utf8");
     const products = JSON.parse(jsonData);
@@ -94,55 +94,76 @@ async function getProductFromJson(jsonFilePath) {
       throw new Error("JSON file is empty or not an array");
     }
 
-    const firstProduct = products[5] || {};
-    const basePrice = String(firstProduct.price || "10");
+    if (index < 0 || index >= products.length) {
+      throw new Error(
+        `Index ${index} is out of bounds (0-${products.length - 1})`
+      );
+    }
+
+    const selectedProduct = products[index] || {};
+    const basePrice = String(selectedProduct.price || "10");
     const masterPrice = adjustPrice(basePrice);
     const additionalAmount = getRandomNumber(5, 20);
     const price = (parseFloat(masterPrice) + additionalAmount).toFixed(2);
 
     return {
       title: String(
-        firstProduct.title ||
+        selectedProduct.title ||
           `Test Product ${Math.floor(Math.random() * 10000)}`
       ),
       productId: String(
-        firstProduct.productId || `TEST${Math.floor(Math.random() * 10000)}`
+        selectedProduct.productId || `TEST${Math.floor(Math.random() * 10000)}`
       ),
       masterPrice: String(masterPrice),
       price: String(price),
       costPrice: String(basePrice),
       brand: String(
-        firstProduct.brand || `Brand${Math.floor(Math.random() * 10000)}`
+        selectedProduct.brand || `Brand${Math.floor(Math.random() * 10000)}`
       ),
       sourceUrl: String(
-        firstProduct.sourceUrl ||
+        selectedProduct.sourceUrl ||
           `https://example.com/product/${Math.floor(Math.random() * 10000)}`
       ),
       description: String(
-        firstProduct.description || "<p>Default description</p>"
+        selectedProduct.description || "<p>Default description</p>"
       ),
-      images: String(firstProduct.images || ""),
-      categories: Array.isArray(firstProduct.categories)
-        ? firstProduct.categories
+      images: String(selectedProduct.images || ""),
+      categories: Array.isArray(selectedProduct.categories)
+        ? selectedProduct.categories
         : ["General", "Product"],
-      specifications: Array.isArray(firstProduct.specifications)
-        ? firstProduct.specifications
+      specifications: Array.isArray(selectedProduct.specifications)
+        ? selectedProduct.specifications
         : [],
     };
   } catch (error) {
-    console.log(`Error reading JSON: ${error.message}. Using random product.`);
+    console.log(
+      `Error reading JSON or invalid index: ${error.message}. Using random product.`
+    );
     return generateRandomProduct();
   }
 }
 
-// Prompts user for JSON file path
-async function getJsonFilePath() {
+// Prompts user for JSON file path and index
+async function getJsonFilePathAndIndex() {
   return new Promise((resolve) => {
     readline.question(
       "Enter the full path to your products.json file (or press Enter for random): ",
       (path) => {
-        readline.close();
-        resolve(path.trim().replace(/^"|"$/g, ""));
+        if (!path.trim()) {
+          readline.close();
+          resolve({ jsonFilePath: "", index: -1 });
+          return;
+        }
+        readline.question(
+          "Enter the index of the product to upload (0-based): ",
+          (index) => {
+            readline.close();
+            resolve({
+              jsonFilePath: path.trim().replace(/^"|"$/g, ""),
+              index: parseInt(index) || 0,
+            });
+          }
+        );
       }
     );
   });
@@ -197,7 +218,7 @@ async function getProductSlug(page) {
   throw new Error("Could not extract slug from URL");
 }
 
-// Main function to upload product
+// Main function to upload product at specific index
 async function uploadProduct() {
   const config = {
     email: "buzhijiedai@gmail.com",
@@ -210,9 +231,9 @@ async function uploadProduct() {
   let downloadedImages = [];
 
   try {
-    const jsonFilePath = await getJsonFilePath();
+    const { jsonFilePath, index } = await getJsonFilePathAndIndex();
     const product = jsonFilePath
-      ? await getProductFromJson(jsonFilePath)
+      ? await getProductFromJson(jsonFilePath, index)
       : generateRandomProduct();
     console.log("Product data:", product);
 
@@ -296,7 +317,7 @@ async function uploadProduct() {
         timeout: 30000,
       });
       await page.type(".select2-search__field", taxon, { delay: 0 });
-      await delay(500); // Reduced delay
+      await delay(500);
       await page.keyboard.press("Enter");
       await delay(500);
     }
