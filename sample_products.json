@@ -1,0 +1,10 @@
+[
+  {
+    "title": "Sample Rich Text Product",
+    "productId": "SAMPLE123",
+    "price": "25.50",
+    "brand": "SampleBrand",
+    "sourceUrl": "https://example.com/sample-product-123",
+    "description": "\n      <div style='font-family: Arial, sans-serif;'>\n        <h1>Premium Product</h1>\n        <p>This is a <strong>high-quality</strong> product featuring:</p>\n        <ul style='color: green;'>\n          <li>Amazing Feature 1</li>\n          <li>Stunning Feature 2</li>\n          <li>Incredible Feature 3</li>\n        </ul>\n        <p style='font-size: 16px; color: #ff0000;'>\n          Limited time offer! Order now!\n        </p>\n      </div>\n    "
+  }
+]
