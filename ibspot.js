@@ -10,16 +10,53 @@ const axios = require("axios");
 // Utility function to delay execution
 const delay = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
-// Adjusts price based on rules (in dollars)
-function adjustPrice(originalPrice) {
-  const priceNum = parseFloat(originalPrice);
-  if (isNaN(priceNum)) return adjustPrice("10");
-  return priceNum < 20 ? (priceNum + 20).toFixed(2) : (priceNum * 2).toFixed(2);
+// Prompts user for USD to TRY exchange rate
+async function getUserExchangeRate() {
+  return new Promise((resolve) => {
+    readline.question(
+      "Enter the USD to TRY exchange rate (e.g., 37.06): ",
+      (input) => {
+        const rate = parseFloat(input.trim());
+        if (isNaN(rate) || rate <= 0) {
+          console.log("Invalid rate provided. Using default rate of 37.06.");
+          resolve(37.06);
+        } else {
+          resolve(rate);
+        }
+      }
+    );
+  });
+}
+
+// Adjusts price based on rules (assumes originalPrice is in TRY, converts to USD)
+function adjustPrice(originalPrice, exchangeRate) {
+  const priceNumInTRY = parseFloat(originalPrice);
+  if (isNaN(priceNumInTRY)) return adjustPrice("370.60", exchangeRate); // Default 10 USD * 37.06
+  const priceNumInUSD = priceNumInTRY / exchangeRate; // Convert TRY to USD
+  return priceNumInUSD < 20
+    ? (priceNumInUSD + 20).toFixed(2) // Add 20 USD if < 20 USD
+    : (priceNumInUSD * 2).toFixed(2); // Double if >= 20 USD
 }
 
 // Generates random number between min and max (inclusive)
 function getRandomNumber(min, max) {
   return Math.floor(Math.random() * (max - min + 1)) + min;
+}
+
+// Prompts user for custom keywords for taxons
+async function getCustomKeywords() {
+  return new Promise((resolve) => {
+    readline.question(
+      "Enter custom keywords for taxons (comma-separated, e.g., Electronics, Gadgets) or press Enter for defaults: ",
+      (input) => {
+        const keywords = input
+          .split(",")
+          .map((k) => k.trim())
+          .filter(Boolean);
+        resolve(keywords.length > 0 ? keywords : ["General", "Product"]);
+      }
+    );
+  });
 }
 
 // Gets Taxons from keywords with ensured array return
@@ -50,26 +87,28 @@ async function downloadImage(url, filepath) {
   }
 }
 
-// Generates a random product
-function generateRandomProduct() {
+// Generates a random product (prices in TRY, converted to USD)
+function generateRandomProduct(exchangeRate, customKeywords) {
   const randomNum = Math.floor(Math.random() * 10000);
-  const basePrice = (Math.random() * 100 + 10).toFixed(2); // In dollars
-  const masterPrice = adjustPrice(basePrice);
-  const additionalAmount = getRandomNumber(5, 20);
-  const price = (parseFloat(masterPrice) + additionalAmount).toFixed(2);
+  const basePriceInTRY = (Math.random() * 3706 + 370.6).toFixed(2); // Random between 10-100 USD in TRY (370.6 - 3706 TRY at 37.06 rate)
+  const basePriceInUSD = (basePriceInTRY / exchangeRate).toFixed(2);
+  const masterPriceInUSD = adjustPrice(basePriceInTRY, exchangeRate); // In USD
+  const additionalAmount = getRandomNumber(5, 20); // Additional in USD
+  const priceInUSD = (parseFloat(masterPriceInUSD) + additionalAmount).toFixed(
+    2
+  );
 
-  const possibleKeywords = ["Electronics", "Clothing", "Home", "Toys", "Books"];
-  const keywords = [
-    possibleKeywords[Math.floor(Math.random() * possibleKeywords.length)],
-    possibleKeywords[Math.floor(Math.random() * possibleKeywords.length)],
-  ];
+  const keywords =
+    customKeywords.length > 0
+      ? customKeywords
+      : ["Electronics", "Clothing", "Home", "Toys", "Books"].slice(0, 2);
 
   return {
     title: `Test Product ${randomNum}`,
     productId: `TEST${randomNum}`,
-    masterPrice: String(masterPrice),
-    price: String(price),
-    costPrice: String(basePrice),
+    masterPrice: String(masterPriceInUSD), // In USD
+    price: String(priceInUSD), // In USD
+    costPrice: String(basePriceInUSD), // In USD
     brand: `Brand${randomNum}`,
     sourceUrl: `https://example.com/product/${randomNum}`,
     description: `<div dir="ltr" style="font-family: Arial, sans-serif; text-align: left;"><h2>Test Product ${randomNum}</h2><p>This is a <strong>feature-rich</strong> product.</p></div>`,
@@ -77,12 +116,12 @@ function generateRandomProduct() {
     keywords,
     specifications: [],
     stock: "100",
-    rating: String(getRandomNumber(1, 5)), // Random rating 1-5
+    rating: String(getRandomNumber(1, 5)),
   };
 }
 
 // Reads all products from JSON with fallback to random product
-async function getProductsFromJson(jsonFilePath) {
+async function getProductsFromJson(jsonFilePath, exchangeRate, customKeywords) {
   try {
     const jsonData = await fsPromises.readFile(jsonFilePath, "utf8");
     const products = JSON.parse(jsonData);
@@ -91,10 +130,15 @@ async function getProductsFromJson(jsonFilePath) {
     }
 
     return products.map((product) => {
-      const basePrice = String(product.price || "10"); // In dollars
-      const masterPrice = adjustPrice(basePrice);
-      const additionalAmount = getRandomNumber(5, 20);
-      const price = (parseFloat(masterPrice) + additionalAmount).toFixed(2);
+      const basePriceInTRY = String(product.price || "370.60"); // Assume TRY, default 10 USD * 37.06
+      const basePriceInUSD = (
+        parseFloat(basePriceInTRY) / exchangeRate
+      ).toFixed(2);
+      const masterPriceInUSD = adjustPrice(basePriceInTRY, exchangeRate); // In USD
+      const additionalAmount = getRandomNumber(5, 20); // In USD
+      const priceInUSD = (
+        parseFloat(masterPriceInUSD) + additionalAmount
+      ).toFixed(2);
 
       return {
         title: String(
@@ -103,9 +147,9 @@ async function getProductsFromJson(jsonFilePath) {
         productId: String(
           product.productId || `TEST${Math.floor(Math.random() * 10000)}`
         ),
-        masterPrice: String(masterPrice),
-        price: String(price),
-        costPrice: String(basePrice),
+        masterPrice: String(masterPriceInUSD), // In USD
+        price: String(priceInUSD), // In USD
+        costPrice: String(basePriceInUSD), // In USD
         brand: String(
           product.brand || `Brand${Math.floor(Math.random() * 10000)}`
         ),
@@ -121,7 +165,7 @@ async function getProductsFromJson(jsonFilePath) {
         images: String(product.images || ""),
         keywords: Array.isArray(product.keywords)
           ? product.keywords
-          : ["General", "Product"],
+          : customKeywords,
         specifications: Array.isArray(product.specifications)
           ? product.specifications
           : [],
@@ -131,7 +175,7 @@ async function getProductsFromJson(jsonFilePath) {
     });
   } catch (error) {
     console.log(`Error reading JSON: ${error.message}. Using random product.`);
-    return [generateRandomProduct()];
+    return [generateRandomProduct(exchangeRate, customKeywords)];
   }
 }
 
@@ -141,7 +185,6 @@ async function getJsonFilePath() {
     readline.question(
       "Enter the full path to your products.json file (or press Enter for random): ",
       (path) => {
-        readline.close();
         resolve(path.trim().replace(/^"|"$/g, ""));
       }
     );
@@ -202,7 +245,6 @@ async function uploadSingleProduct(page, product, config) {
   let downloadedImages = [];
 
   try {
-    // First page
     console.log(`Navigating to New Product page for ${product.title}...`);
     await page.goto(config.newProductUrl, { waitUntil: "networkidle2" });
     await page.waitForSelector("#product_name", {
@@ -225,8 +267,34 @@ async function uploadSingleProduct(page, product, config) {
     await page.select("#product_shipping_category_id", "5698");
     await delay(500);
 
+    // Submit the first page and check for SKU error
     await page.click('button.btn.btn-success[type="submit"]');
-    await page.waitForNavigation({ waitUntil: "networkidle2", timeout: 60000 });
+    await Promise.race([
+      page.waitForNavigation({ waitUntil: "networkidle2", timeout: 60000 }),
+      page.waitForSelector("#errorExplanation.alert-danger", {
+        timeout: 10000,
+      }), // Look for the error div
+    ]);
+
+    // Check if the specific SKU error exists
+    const skuError = await page.evaluate(() => {
+      const errorDiv = document.querySelector("#errorExplanation.alert-danger");
+      if (
+        errorDiv &&
+        errorDiv.textContent.includes("Sku has already been taken")
+      ) {
+        return true;
+      }
+      return false;
+    });
+
+    if (skuError) {
+      console.log(
+        `SKU ${product.productId} Trendyol_TR already exists. Skipping to next product...`
+      );
+      return; // Exit immediately and move to the next product
+    }
+
     console.log("First page submitted");
 
     await page.screenshot({
@@ -234,7 +302,6 @@ async function uploadSingleProduct(page, product, config) {
       fullPage: true,
     });
 
-    // Second page
     console.log("Starting second page...");
     const editUrl = page.url();
     console.log("Edit page URL:", editUrl);
@@ -266,7 +333,6 @@ async function uploadSingleProduct(page, product, config) {
       await delay(500);
     }
 
-    // Handle description with explicit LTR direction
     console.log("Handling description...");
     await page.waitForSelector("#cke_product_description iframe", {
       visible: true,
@@ -278,12 +344,11 @@ async function uploadSingleProduct(page, product, config) {
     await frame.waitForSelector("body", { visible: true, timeout: 30000 });
     await frame.evaluate((desc) => {
       document.body.innerHTML = desc;
-      document.body.style.direction = "ltr"; // Ensure LTR direction
-      document.body.style.textAlign = "left"; // Align text to the left
+      document.body.style.direction = "ltr";
+      document.body.style.textAlign = "left";
     }, product.description);
     await delay(500);
 
-    // Sync to GMC checkbox
     console.log("Checking Sync to GMC...");
     await page.evaluate(() => {
       const checkbox = Array.from(
@@ -295,13 +360,9 @@ async function uploadSingleProduct(page, product, config) {
     });
     await delay(500);
 
-    // Submit second page
     await page.waitForSelector(
       '.form-actions button.btn.btn-success[type="submit"]',
-      {
-        visible: true,
-        timeout: 30000,
-      }
+      { visible: true, timeout: 30000 }
     );
     await page.click('.form-actions button.btn.btn-success[type="submit"]');
     await page.waitForNavigation({ waitUntil: "networkidle2", timeout: 60000 });
@@ -312,14 +373,12 @@ async function uploadSingleProduct(page, product, config) {
       fullPage: true,
     });
 
-    // Images page
     console.log("Navigating to Images page...");
     const slug = await getProductSlug(page);
     const imagesUrl = `https://ibspot.com/admin/products/${slug}/images`;
     await page.goto(imagesUrl, { waitUntil: "networkidle2" });
     await delay(1000);
 
-    // Handle images
     const imageFiles = product.images
       .split(";")
       .map((url) => url.trim())
@@ -366,7 +425,6 @@ async function uploadSingleProduct(page, product, config) {
       fullPage: true,
     });
 
-    // Product Properties page (including rating)
     console.log("Navigating to Product Properties page...");
     const propertiesUrl = `https://ibspot.com/admin/products/${slug}/product_properties`;
     await page.goto(propertiesUrl, { waitUntil: "networkidle2" });
@@ -451,10 +509,13 @@ async function uploadAllProducts() {
 
   let browser;
   try {
+    const exchangeRate = await getUserExchangeRate();
+    console.log(`Using USD to TRY exchange rate: ${exchangeRate}`);
+    const customKeywords = await getCustomKeywords();
     const jsonFilePath = await getJsonFilePath();
     const products = jsonFilePath
-      ? await getProductsFromJson(jsonFilePath)
-      : [generateRandomProduct()];
+      ? await getProductsFromJson(jsonFilePath, exchangeRate, customKeywords)
+      : [generateRandomProduct(exchangeRate, customKeywords)];
     console.log(`Found ${products.length} products to process`);
 
     browser = await puppeteer.launch({
@@ -465,7 +526,6 @@ async function uploadAllProducts() {
     const page = await browser.newPage();
     await page.setViewport({ width: 1920, height: 1080 });
 
-    // Login
     console.log("Attempting login...");
     await page.goto(config.loginUrl, { waitUntil: "networkidle2" });
     await page.waitForSelector("#spree_user_email", {
@@ -479,7 +539,6 @@ async function uploadAllProducts() {
       page.waitForNavigation({ waitUntil: "networkidle2", timeout: 60000 }),
     ]);
 
-    // Process each product
     for (const [index, product] of products.entries()) {
       console.log(
         `Processing product ${index + 1} of ${products.length}: ${
@@ -487,7 +546,7 @@ async function uploadAllProducts() {
         }`
       );
       await uploadSingleProduct(page, product, config);
-      await delay(2000); // Small delay between products
+      await delay(2000);
     }
 
     console.log("All products processed successfully");
@@ -495,6 +554,7 @@ async function uploadAllProducts() {
     console.error("Error in main process:", error.message);
   } finally {
     if (browser) await browser.close();
+    readline.close();
     console.log("Process completed");
   }
 }
