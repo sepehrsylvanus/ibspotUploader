@@ -82,6 +82,7 @@ function generateRandomProduct() {
     images: "",
     categories,
     specifications: [],
+    stock: "100", // Added stock quantity
   };
 }
 
@@ -128,6 +129,7 @@ async function getProductFromJson(jsonFilePath) {
       specifications: Array.isArray(firstProduct.specifications)
         ? firstProduct.specifications
         : [],
+      stock: String(firstProduct.stock || "100"), // Added stock quantity with fallback
     };
   } catch (error) {
     console.log(`Error reading JSON: ${error.message}. Using random product.`);
@@ -285,6 +287,9 @@ async function uploadProduct() {
     await page.type("#product_main_brand", product.brand, { delay: 0 });
     await page.type("#product_source_url", product.sourceUrl, { delay: 0 });
 
+    // Add stock quantity
+    await page.type("#product_stock_total", product.stock, { delay: 0 });
+
     await setFlatpickrDate(page, ".flatpickr-alt-input", dateString);
     await page.select("#product_tax_category_id", "1");
 
@@ -296,7 +301,7 @@ async function uploadProduct() {
         timeout: 30000,
       });
       await page.type(".select2-search__field", taxon, { delay: 0 });
-      await delay(500); // Reduced delay
+      await delay(500);
       await page.keyboard.press("Enter");
       await delay(500);
     }
