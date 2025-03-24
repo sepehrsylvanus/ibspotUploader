@@ -1,13 +1,14 @@
 [
   {
-    "title": "Test Product 0 - Tavşan Desenli Tarak 7307",
-    "productId": "TEST7307",
-    "price": "131.63",
+    "title": "Test Product 0 - Tavşan Desenli Tarak 3816",
+    "productId": "TEST3816",
+    "usdPrice": "57.15",
+    "price": "57.15",
     "brand": "BEYZANA",
     "sourceUrl": "https://example.com/test-product-0",
     "description": "<p>Test product description for Tavşan Desenli Tarak 0</p>",
     "images": "https://example.com/test-image-0.jpg",
-    "categories": "BEYZANA>Kozmetik>Saç Bakımı>Saç Fırçası ve Tarak>BEYZANA Saç Fırçası ve Tarak 0>Tavşan Desenli Kız Çoçuğu Tarağı 7307",
+    "categories": "BEYZANA>Kozmetik>Saç Bakımı>Saç Fırçası ve Tarak>BEYZANA Saç Fırçası ve Tarak 0>Tavşan Desenli Kız Çoçuğu Tarağı 3816",
     "specifications": [
       {
         "name": "Material",

@@ -68,7 +68,9 @@ const getProducts = async (jsonPath, isTestMode, exchangeRate) => {
     }
 
     return products.map((p, i) => {
-      const baseUsdPrice = parseFloat(p.price || "10").toFixed(2); // Price assumed in USD
+      console.log({ price: p.price });
+
+      const baseUsdPrice = p.price / exchangeRate; // Price assumed in USD
       const basePrice = (baseUsdPrice * exchangeRate).toFixed(2); // Convert to local currency
       const masterPrice = (basePrice * 1.1).toFixed(2); // 10% markup in local currency
       const price = (parseFloat(masterPrice) + Math.random() * 15 + 5).toFixed(
@@ -81,10 +83,10 @@ const getProducts = async (jsonPath, isTestMode, exchangeRate) => {
       return {
         title: String(p.title || testProduct.title || "Default Product"),
         productId: String(p.productId || testProduct.productId || "DEFAULT123"),
-        usdPrice: baseUsdPrice, // Store original USD price
-        masterPrice, // In local currency
-        price, // In local currency
-        costPrice: basePrice, // In local currency
+        usdPrice: baseUsdPrice.toFixed(2), // Store original USD price
+        masterPrice: (masterPrice / exchangeRate).toFixed(2), // In local currency
+        price: (price / exchangeRate).toFixed(2), // In local currency
+        costPrice: (basePrice / exchangeRate).toFixed(2), // In local currency
         brand: String(p.brand || testProduct.brand || "DefaultBrand"),
         sourceUrl: String(
           p.sourceUrl || testProduct.sourceUrl || "https://example.com"
@@ -325,7 +327,7 @@ const uploadProducts = async () => {
         );
         await page.type("#product_name", product.title);
         await page.type("#product_price", product.masterPrice); // Price in local currency
-        await page.type("#product_sku", `${product.productId} Trendyol_TR`);
+        await page.type("#product_sku", `${product.productId} sdccsdcsdcd_TR`);
         await page.select("#product_prototype_id", "1");
         await setDate(
           page,
