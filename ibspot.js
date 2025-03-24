@@ -10,10 +10,28 @@ const axios = require("axios");
 // Utility function to delay execution
 const delay = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
-// Adjusts price based on rules
-function adjustPrice(originalPrice) {
-  const priceNum = parseFloat(originalPrice);
-  if (isNaN(priceNum)) return adjustPrice("10");
+// Prompts user for exchange rate
+async function getExchangeRate() {
+  return new Promise((resolve) => {
+    readline.question(
+      "Enter the exchange rate (local currency to USD, e.g., 31.50 for TRY to USD): ",
+      (rate) => {
+        const parsedRate = parseFloat(rate);
+        if (isNaN(parsedRate) || parsedRate <= 0) {
+          console.log("Invalid rate, defaulting to 1 (no conversion).");
+          resolve(1);
+        } else {
+          resolve(parsedRate);
+        }
+      }
+    );
+  });
+}
+
+// Adjusts price based on rules and converts to USD
+function adjustPrice(originalPrice, exchangeRate) {
+  const priceNum = parseFloat(originalPrice) / exchangeRate; // Convert to USD
+  if (isNaN(priceNum)) return adjustPrice("10", exchangeRate);
   return priceNum < 20 ? (priceNum + 20).toFixed(2) : (priceNum * 2).toFixed(2);
 }
 
@@ -50,11 +68,12 @@ async function downloadImage(url, filepath) {
   }
 }
 
-// Generates a random product
-function generateRandomProduct() {
+// Generates a random product with USD conversion
+function generateRandomProduct(exchangeRate) {
   const randomNum = Math.floor(Math.random() * 10000);
-  const basePrice = (Math.random() * 100 + 10).toFixed(2);
-  const masterPrice = adjustPrice(basePrice);
+  const basePriceLocal = (Math.random() * 100 + 10).toFixed(2); // Assume local currency
+  const basePrice = (parseFloat(basePriceLocal) / exchangeRate).toFixed(2); // Convert to USD
+  const masterPrice = adjustPrice(basePrice, 1); // Already in USD, no further conversion
   const additionalAmount = getRandomNumber(5, 20);
   const price = (parseFloat(masterPrice) + additionalAmount).toFixed(2);
 
@@ -82,12 +101,12 @@ function generateRandomProduct() {
     images: "",
     categories,
     specifications: [],
-    stock: "100", // Added stock quantity
+    stock: "100",
   };
 }
 
-// Reads product from JSON with fallback to random product
-async function getProductFromJson(jsonFilePath) {
+// Reads product from JSON with USD conversion
+async function getProductFromJson(jsonFilePath, exchangeRate) {
   try {
     const jsonData = await fsPromises.readFile(jsonFilePath, "utf8");
     const products = JSON.parse(jsonData);
@@ -95,9 +114,10 @@ async function getProductFromJson(jsonFilePath) {
       throw new Error("JSON file is empty or not an array");
     }
 
-    const firstProduct = products[5] || {};
-    const basePrice = String(firstProduct.price || "10");
-    const masterPrice = adjustPrice(basePrice);
+    const firstProduct = products[103] || {};
+    const basePriceLocal = String(firstProduct.price || "10"); // Assume local currency
+    const basePrice = (parseFloat(basePriceLocal) / exchangeRate).toFixed(2); // Convert to USD
+    const masterPrice = adjustPrice(basePrice, 1); // Already in USD
     const additionalAmount = getRandomNumber(5, 20);
     const price = (parseFloat(masterPrice) + additionalAmount).toFixed(2);
 
@@ -129,11 +149,11 @@ async function getProductFromJson(jsonFilePath) {
       specifications: Array.isArray(firstProduct.specifications)
         ? firstProduct.specifications
         : [],
-      stock: String(firstProduct.stock || "100"), // Added stock quantity with fallback
+      stock: String(firstProduct.stock || "100"),
     };
   } catch (error) {
     console.log(`Error reading JSON: ${error.message}. Using random product.`);
-    return generateRandomProduct();
+    return generateRandomProduct(exchangeRate);
   }
 }
 
@@ -143,7 +163,6 @@ async function getJsonFilePath() {
     readline.question(
       "Enter the full path to your products.json file (or press Enter for random): ",
       (path) => {
-        readline.close();
         resolve(path.trim().replace(/^"|"$/g, ""));
       }
     );
@@ -209,21 +228,28 @@ async function uploadProduct() {
   };
 
   let browser;
+  let page;
   let downloadedImages = [];
 
   try {
+    // Get exchange rate first
+    const exchangeRate = await getExchangeRate();
+    console.log(`Using exchange rate: ${exchangeRate} (local currency to USD)`);
+
     const jsonFilePath = await getJsonFilePath();
     const product = jsonFilePath
-      ? await getProductFromJson(jsonFilePath)
-      : generateRandomProduct();
-    console.log("Product data:", product);
+      ? await getProductFromJson(jsonFilePath, exchangeRate)
+      : generateRandomProduct(exchangeRate);
+    console.log("Product data (in USD):", product);
 
+    console.log("Launching browser...");
     browser = await puppeteer.launch({
       headless: false,
       args: ["--no-sandbox", "--disable-setuid-sandbox", "--start-maximized"],
       defaultViewport: null,
     });
-    const page = await browser.newPage();
+    page = await browser.newPage();
+    console.log("Page created");
     await page.setViewport({ width: 1920, height: 1080 });
 
     // Login
@@ -239,6 +265,7 @@ async function uploadProduct() {
       page.click('input[type="submit"]'),
       page.waitForNavigation({ waitUntil: "networkidle2", timeout: 60000 }),
     ]);
+    console.log("Login successful");
 
     // First page
     console.log("Navigating to New Product page...");
@@ -277,18 +304,33 @@ async function uploadProduct() {
     const editUrl = page.url();
     console.log("Edit page URL:", editUrl);
 
-    await page.waitForSelector("#product_compare_at_price", {
-      visible: true,
-      timeout: 30000,
-    });
+    // Increase timeout and add fallback
+    const comparePriceSelector = "#product_compare_at_price";
+    try {
+      await page.waitForSelector(comparePriceSelector, {
+        visible: true,
+        timeout: 60000,
+      });
+      console.log("Second page loaded successfully");
+    } catch (e) {
+      console.error(`Failed to find ${comparePriceSelector}: ${e.message}`);
+      await page.screenshot({ path: "second_page_error.png", fullPage: true });
+      throw new Error("Second page load failed");
+    }
 
     await page.type("#product_compare_at_price", product.price, { delay: 0 });
     await page.type("#product_cost_price", product.costPrice, { delay: 0 });
-    await page.type("#product_main_brand", product.brand, { delay: 0 });
     await page.type("#product_source_url", product.sourceUrl, { delay: 0 });
+    await page.type("#product_main_brand", product.brand, { delay: 0 });
 
-    // Add stock quantity
-    await page.type("#product_stock_total", product.stock, { delay: 0 });
+    // Add stock quantity using the correct selector
+    await page.waitForSelector("#stock_movement_quantity", {
+      visible: true,
+      timeout: 30000,
+    });
+    await page.type("#stock_movement_quantity", product.stock, { delay: 0 });
+    await page.click('button.btn.btn-primary[type="submit"]'); // Click the Add Stock button
+    await delay(1000); // Wait for stock to be added
 
     await setFlatpickrDate(page, ".flatpickr-alt-input", dateString);
     await page.select("#product_tax_category_id", "1");
@@ -420,7 +462,6 @@ async function uploadProduct() {
             visible: true,
             timeout: 30000,
           });
-
           await page.waitForSelector(".spree_add_fields.btn-success", {
             visible: true,
             timeout: 30000,
@@ -432,14 +473,10 @@ async function uploadProduct() {
           const lastRow = rows[rows.length - 1];
 
           const nameInput = await lastRow.$("td:nth-child(2) input");
-          if (nameInput) {
-            await nameInput.type(spec.name || "", { delay: 0 });
-          }
+          if (nameInput) await nameInput.type(spec.name || "", { delay: 0 });
 
           const valueInput = await lastRow.$("td:nth-child(3) input");
-          if (valueInput) {
-            await valueInput.type(spec.value || "", { delay: 0 });
-          }
+          if (valueInput) await valueInput.type(spec.value || "", { delay: 0 });
 
           await delay(500);
           console.log(`Added specification: ${spec.name} = ${spec.value}`);
@@ -466,7 +503,11 @@ async function uploadProduct() {
     console.log("Product creation completed successfully");
   } catch (error) {
     console.error("Error:", error.message);
-    await page?.screenshot({ path: "error_screenshot.png", fullPage: true });
+    if (page) {
+      await page.screenshot({ path: "error_screenshot.png", fullPage: true });
+    } else {
+      console.error("Page not initialized due to earlier error.");
+    }
   } finally {
     for (const imagePath of downloadedImages) {
       try {
@@ -477,6 +518,7 @@ async function uploadProduct() {
     }
     if (browser) await browser.close();
     console.log("Process completed");
+    readline.close(); // Close readline after process ends
   }
 }
 
