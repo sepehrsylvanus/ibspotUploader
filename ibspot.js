@@ -10,6 +10,35 @@ const axios = require("axios");
 // Utility function to delay execution
 const delay = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
+// Enhanced slug generation function combining title and SKU
+const generateSlugFromTitleAndSku = (title, sku) => {
+  const turkishToLatin = {
+    ğ: "g",
+    ü: "u",
+    ş: "s",
+    ı: "i",
+    ö: "o",
+    ç: "c",
+    Ğ: "g",
+    Ü: "u",
+    Ş: "s",
+    İ: "i",
+    Ö: "o",
+    Ç: "c",
+  };
+
+  const titlePart = title
+    .replace(/[ğüşıöçĞÜŞİÖÇ]/g, (match) => turkishToLatin[match]) // Transliterate Turkish characters
+    .toLowerCase() // Convert to lowercase
+    .replace(/%100/g, "100") // Convert %100 to 100
+    .replace(/[^a-z0-9]+/g, "-") // Replace non-alphanumeric with hyphen
+    .replace(/\s+/g, "-") // Replace spaces with hyphen
+    .replace(/-+/g, "-") // Replace multiple hyphens with single hyphen
+    .replace(/(^-|-$)/g, ""); // Remove leading/trailing hyphens
+
+  return `${titlePart}`; // Append SKU with hyphen
+};
+
 // Prompt user for USD exchange rate
 const getExchangeRate = () =>
   new Promise((resolve) => {
@@ -40,7 +69,7 @@ const getCategory = () =>
 const generateTestProduct = (index, exchangeRate) => {
   const randomId = Math.floor(Math.random() * 10000);
   const categories = `BEYZANA>Kozmetik>Saç Bakımı>Saç Fırçası ve Tarak>BEYZANA Saç Fırçası ve Tarak ${index}>Tavşan Desenli Kız Çoçuğu Tarağı ${randomId}`;
-  const usdPrice = (Math.random() * 100 + 50).toFixed(2); // Base USD price
+  const usdPrice = (Math.random() * 100 + 50).toFixed(2);
   const costPriceUSD = parseFloat(usdPrice);
   const masterPriceUSD =
     costPriceUSD < 20
@@ -80,10 +109,8 @@ const getProducts = async (jsonPath, isTestMode, exchangeRate) => {
     }
 
     return products.map((p, i) => {
-      const baseUsdPrice = parseFloat(p.price) / exchangeRate; // Convert input price to USD
-      console.log({ baseUsdPrice });
+      const baseUsdPrice = parseFloat(p.price) / exchangeRate;
       const costPriceUSD = baseUsdPrice.toFixed(2);
-      console.log({ costPriceUSD });
       const masterPriceUSD =
         baseUsdPrice < 20
           ? (baseUsdPrice + 20).toFixed(2)
@@ -93,7 +120,7 @@ const getProducts = async (jsonPath, isTestMode, exchangeRate) => {
         Math.random() * 15 +
         5
       ).toFixed(2);
-      console.log({ price });
+
       const testProduct = isTestMode
         ? generateTestProduct(i, exchangeRate)
         : {};
@@ -168,7 +195,7 @@ const navigateWithRetry = async (page, url, maxRetries = 3) => {
           `Navigation failed after ${maxRetries} attempts: ${error.message}`
         );
       }
-      await delay(1000 * attempt);
+      await delay(1000 * delay);
     }
   }
 };
@@ -294,7 +321,7 @@ const getSlug = async (page) => {
 // Main product upload function
 const uploadProducts = async () => {
   const config = {
-    email: "buzhijiedai@gmail.com",
+    email: "abrahamzhang144000@gmail.com",
     password: "Godislove153",
     loginUrl: "https://ibspot.com/admin/login",
     newProductUrl: "https://ibspot.com/admin/products/new",
@@ -334,6 +361,7 @@ const uploadProducts = async () => {
       );
       const downloadedFiles = [];
       let slug;
+      const productSku = `${product.productId}_Trendyol_TR_FWD`; // Define SKU here
 
       try {
         // Step 1: Go to new product page and enter basic details
@@ -348,7 +376,7 @@ const uploadProducts = async () => {
           "#product_price",
           parseFloat(product.masterPrice).toFixed(2)
         );
-        await page.type("#product_sku", `${product.productId}_Trendyol_TR_FWD`);
+        await page.type("#product_sku", productSku);
         await page.select("#product_prototype_id", "1");
         await setDate(
           page,
@@ -358,7 +386,7 @@ const uploadProducts = async () => {
         await page.select("#product_shipping_category_id", "5698");
         await Promise.all([
           page.click('button.btn.btn-success[type="submit"]'),
-          page.waitForNavigation(),
+          page.waitForNavigation({ waitUntil: "networkidle2" }),
         ]);
 
         // Check for SKU error
@@ -368,17 +396,25 @@ const uploadProducts = async () => {
           )
           .catch(() => false);
         if (skuError) {
-          console.log(`SKU already taken for ${product.title}. Skipping.`);
-          continue;
+          console.log(`SKU already taken for ${product.title}.`);
+          slug = generateSlugFromTitleAndSku(product.title, productSku);
+          console.log(`Generated slug from title and SKU: ${slug}`);
+          const editUrlFromTitle = `https://ibspot.com/admin/products/${slug}/edit`;
+          console.log(`Navigating to edit URL: ${editUrlFromTitle}`);
+          await navigateWithRetry(page, editUrlFromTitle);
+        } else {
+          slug = await getSlug(page);
         }
-
-        // Get slug for subsequent steps
-        slug = await getSlug(page);
 
         // Step 2: Go to edit page and add taxon
         try {
-          const editUrl = `https://ibspot.com/admin/products/${slug}/edit`;
-          await navigateWithRetry(page, editUrl);
+          const editUrl = `https://ibspot.com/admin/products/${generateSlugFromTitleAndSku(
+            product.title,
+            productSku
+          )}/edit`;
+          if (!skuError) {
+            await navigateWithRetry(page, editUrl);
+          }
 
           await page.waitForSelector("#product_compare_at_price", {
             timeout: 15000,
@@ -413,7 +449,7 @@ const uploadProducts = async () => {
           );
           await Promise.all([
             page.click('button.btn.btn-success[type="submit"]'),
-            page.waitForNavigation(),
+            page.waitForNavigation({ waitUntil: "networkidle2" }),
           ]);
         } catch (editError) {
           console.error(
@@ -423,8 +459,53 @@ const uploadProducts = async () => {
 
         // Step 3: Upload images
         try {
-          const imagesUrl = `https://ibspot.com/admin/products/${slug}/images`;
+          const imagesUrl = `https://ibspot.com/admin/products/${generateSlugFromTitleAndSku(
+            product.title,
+            productSku
+          )}/images`;
           await navigateWithRetry(page, imagesUrl);
+
+          // Attempt to delete existing images if they exist
+          try {
+            const deleteButtons = await page.$$(
+              '.product-image-container .actions a.btn-danger[data-action="remove"]'
+            );
+
+            console.log(
+              `Found ${deleteButtons.length} existing images to delete`
+            );
+
+            if (deleteButtons.length > 0) {
+              for (const button of deleteButtons) {
+                try {
+                  // Prepare to handle the alert
+                  page.once("dialog", async (dialog) => {
+                    console.log(`Alert message: ${dialog.message()}`);
+                    await dialog.accept(); // Click "OK" on the alert
+                    console.log("Confirmed image deletion via alert");
+                  });
+
+                  // Click delete button
+                  await button.click();
+
+                  // Wait for the image to be removed
+                  await delay(1000);
+                } catch (deleteError) {
+                  console.error(
+                    `Error deleting an image: ${deleteError.message}`
+                  );
+                }
+              }
+              console.log("All existing images deleted");
+            } else {
+              console.log("No existing images found to delete");
+            }
+          } catch (noImagesError) {
+            console.log(
+              "No existing images detected or error checking: ",
+              noImagesError.message
+            );
+          }
 
           const mediaFiles = product.images
             .split(";")
@@ -436,29 +517,40 @@ const uploadProducts = async () => {
               `No images provided for ${product.title}. Skipping image upload.`
             );
           } else {
-            await page.waitForSelector(".image-placeholder .card", {
+            // Wait for the file input to be present
+            await page.waitForSelector('input.upload-input[type="file"]', {
               timeout: 5000,
             });
 
             const downloadedPaths = await downloadMedia(mediaFiles, i);
             downloadedFiles.push(...downloadedPaths);
 
-            for (const path of downloadedPaths) {
-              await page.click(".image-placeholder .card");
-              const fileInput = await page.waitForSelector(
-                'input[type="file"]',
-                { timeout: 3000 }
+            // Directly interact with the file input
+            const fileInput = await page.$('input.upload-input[type="file"]');
+            if (fileInput) {
+              // Make the input visible and enable multiple uploads if not already
+              await page.evaluate((input) => {
+                input.classList.remove("d-none"); // Remove 'display: none'
+                input.style.display = "block"; // Ensure it’s visible
+                input.setAttribute("multiple", ""); // Ensure multiple files can be uploaded
+              }, fileInput);
+
+              // Upload all files at once (since input supports 'multiple')
+              await fileInput.uploadFile(...downloadedPaths);
+
+              // Wait for all uploads to complete
+              await page.waitForFunction(
+                () => !document.querySelector(".pending-image-template"),
+                { timeout: 30000 } // Increased timeout for multiple uploads
               );
-              if (fileInput) {
-                await fileInput.uploadFile(path);
-                await page.waitForFunction(
-                  () => !document.querySelector(".pending-image-template"),
-                  { timeout: 15000 }
-                );
-                console.log(`Uploaded: ${path}`);
-              } else {
-                console.log(`File input not found for ${path}`);
-              }
+
+              console.log(
+                `Uploaded ${
+                  downloadedPaths.length
+                } images: ${downloadedPaths.join(", ")}`
+              );
+            } else {
+              console.log("File input not found");
             }
           }
         } catch (imageError) {
@@ -469,7 +561,10 @@ const uploadProducts = async () => {
 
         // Step 4: Add product properties
         try {
-          const propertiesUrl = `https://ibspot.com/admin/products/${slug}/product_properties`;
+          const propertiesUrl = `https://ibspot.com/admin/products/${generateSlugFromTitleAndSku(
+            product.title,
+            productSku
+          )}/product_properties`;
           await navigateWithRetry(page, propertiesUrl);
 
           await page.evaluate(() => {
@@ -503,7 +598,7 @@ const uploadProducts = async () => {
           );
           await Promise.all([
             page.click('.form-actions button.btn.btn-success[type="submit"]'),
-            page.waitForNavigation(),
+            page.waitForNavigation({ waitUntil: "networkidle2" }),
           ]);
         } catch (propertiesError) {
           console.error(
@@ -512,7 +607,10 @@ const uploadProducts = async () => {
         }
 
         // Step 5: Set stock with delay
-        const stockUrl = `https://ibspot.com/admin/products/${slug}/stock`;
+        const stockUrl = `https://ibspot.com/admin/products/${generateSlugFromTitleAndSku(
+          product.title,
+          productSku
+        )}/stock`;
         await navigateWithRetry(page, stockUrl);
 
         await page.evaluate(() => {
@@ -521,7 +619,7 @@ const uploadProducts = async () => {
         });
         await page.type("#stock_movement_quantity", "100");
         await page.click(".btn.btn-primary");
-        await delay(1000); // Wait 1 second after adding stock to ensure it processes
+        await delay(1000);
 
         console.log(`Successfully processed: ${product.title}`);
       } catch (error) {
