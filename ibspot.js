@@ -56,11 +56,33 @@ const getExchangeRate = () =>
 const getCategory = () =>
   new Promise((resolve) => {
     readline.question(
-      "Enter the category to search in taxons: ",
+      "Enter the category to search in taxons (or press Enter for default): ",
       (category) => {
         const trimmedCategory = category.trim();
         console.log(`Using category: ${trimmedCategory || "Default Category"}`);
         resolve(trimmedCategory || "Saç Fırçası ve Tarak");
+      }
+    );
+  });
+
+// Prompt for JSON path or test mode
+const getJsonPath = () =>
+  new Promise((resolve) => {
+    readline.question(
+      "Enter path to products.json (or Enter for test mode): ",
+      (path) => {
+        const trimmedPath = path.trim().replace(/^"|"$/g, "");
+        if (!trimmedPath) {
+          console.log("Entering test mode.");
+          const testPath = "./test_products.json";
+          fsPromises.writeFile(
+            testPath,
+            JSON.stringify([generateTestProduct(0, 1.0)], null, 2)
+          );
+          resolve({ path: testPath, isTestMode: true });
+        } else {
+          resolve({ path: trimmedPath, isTestMode: false });
+        }
       }
     );
   });
@@ -158,28 +180,6 @@ const getProducts = async (jsonPath, isTestMode, exchangeRate) => {
   }
 };
 
-// Prompt for JSON path or test mode
-const getJsonPath = () =>
-  new Promise((resolve) => {
-    readline.question(
-      "Enter path to products.json (or Enter for test mode): ",
-      (path) => {
-        const trimmedPath = path.trim().replace(/^"|"$/g, "");
-        if (!trimmedPath) {
-          console.log("Entering test mode.");
-          const testPath = "./test_products.json";
-          fsPromises.writeFile(
-            testPath,
-            JSON.stringify([generateTestProduct(0, 1.0)], null, 2)
-          );
-          resolve({ path: testPath, isTestMode: true });
-        } else {
-          resolve({ path: trimmedPath, isTestMode: false });
-        }
-      }
-    );
-  });
-
 // Navigate with retry logic
 const navigateWithRetry = async (page, url, maxRetries = 3) => {
   for (let attempt = 1; attempt <= maxRetries; attempt++) {
@@ -195,7 +195,7 @@ const navigateWithRetry = async (page, url, maxRetries = 3) => {
           `Navigation failed after ${maxRetries} attempts: ${error.message}`
         );
       }
-      await delay(1000 * delay);
+      await delay(1000 * attempt);
     }
   }
 };
@@ -318,8 +318,39 @@ const getSlug = async (page) => {
   return slug;
 };
 
+// Prompt for multiple paths and taxons
+const getMultipleInputs = async () => {
+  const inputs = [];
+  let continueInput = true;
+
+  while (continueInput) {
+    const { path, isTestMode } = await getJsonPath();
+    const category = await getCategory();
+
+    inputs.push({ path, isTestMode, category });
+
+    await new Promise((resolve) => {
+      readline.question(
+        "Do you want to add another path and taxon? (yes/no): ",
+        (answer) => {
+          continueInput = answer.trim().toLowerCase() === "yes";
+          resolve();
+        }
+      );
+    });
+  }
+
+  return inputs;
+};
+
 // Main product upload function
-const uploadProducts = async () => {
+const uploadProducts = async (
+  path,
+  isTestMode,
+  predefinedCategory,
+  exchangeRate,
+  browser
+) => {
   const config = {
     email: "abrahamzhang144000@gmail.com",
     password: "Godislove153",
@@ -327,31 +358,23 @@ const uploadProducts = async () => {
     newProductUrl: "https://ibspot.com/admin/products/new",
   };
 
-  let browser;
   try {
-    const exchangeRate = await getExchangeRate();
-    const predefinedCategory = await getCategory();
-    const { path, isTestMode } = await getJsonPath();
-    readline.close();
     const products = await getProducts(path, isTestMode, exchangeRate);
-    console.log(`Processing ${products.length} products`);
+    console.log(`Processing ${products.length} products from ${path}`);
 
-    browser = await puppeteer.launch({
-      headless: false,
-      args: ["--no-sandbox", "--start-maximized"],
-      defaultViewport: null,
-    });
     const page = await browser.newPage();
     await page.setViewport({ width: 1920, height: 1080 });
 
-    // Login
-    await navigateWithRetry(page, config.loginUrl);
-    await page.type("#spree_user_email", config.email);
-    await page.type("#spree_user_password", config.password);
-    await Promise.all([
-      page.click('input[type="submit"]'),
-      page.waitForNavigation(),
-    ]);
+    // Login (only on the first run or if browser is restarted)
+    if (!(await page.url().includes("ibspot.com/admin"))) {
+      await navigateWithRetry(page, config.loginUrl);
+      await page.type("#spree_user_email", config.email);
+      await page.type("#spree_user_password", config.password);
+      await Promise.all([
+        page.click('input[type="submit"]'),
+        page.waitForNavigation(),
+      ]);
+    }
 
     for (const [i, product] of products.entries()) {
       console.log(
@@ -405,6 +428,7 @@ const uploadProducts = async () => {
         } else {
           slug = await getSlug(page);
         }
+
         // Step 2: Go to edit page and add taxon
         try {
           const editUrl = `https://ibspot.com/admin/products/${generateSlugFromTitleAndSku(
@@ -419,14 +443,11 @@ const uploadProducts = async () => {
             timeout: 15000,
           });
 
-          // Set the "Available On" date in the Flatpickr input
           await setDate(
             page,
             ".flatpickr-alt-input",
-            new Date(Date.now() - 2 * 86400000).toISOString().split("T")[0] // 2 days ago
+            new Date(Date.now() - 2 * 86400000).toISOString().split("T")[0]
           );
-
-          // Fill in other fields
           await page.type("#product_compare_at_price", product.price);
           await page.type("#product_cost_price", product.costPrice);
           await page.type("#product_main_brand", product.brand);
@@ -473,7 +494,6 @@ const uploadProducts = async () => {
           )}/images`;
           await navigateWithRetry(page, imagesUrl);
 
-          // Attempt to delete existing images if they exist
           try {
             const deleteButtons = await page.$$(
               '.product-image-container .actions a.btn-danger[data-action="remove"]'
@@ -486,17 +506,13 @@ const uploadProducts = async () => {
             if (deleteButtons.length > 0) {
               for (const button of deleteButtons) {
                 try {
-                  // Prepare to handle the alert
                   page.once("dialog", async (dialog) => {
                     console.log(`Alert message: ${dialog.message()}`);
-                    await dialog.accept(); // Click "OK" on the alert
+                    await dialog.accept();
                     console.log("Confirmed image deletion via alert");
                   });
 
-                  // Click delete button
                   await button.click();
-
-                  // Wait for the image to be removed
                   await delay(1000);
                 } catch (deleteError) {
                   console.error(
@@ -525,7 +541,6 @@ const uploadProducts = async () => {
               `No images provided for ${product.title}. Skipping image upload.`
             );
           } else {
-            // Wait for the file input to be present
             await page.waitForSelector('input.upload-input[type="file"]', {
               timeout: 5000,
             });
@@ -533,23 +548,19 @@ const uploadProducts = async () => {
             const downloadedPaths = await downloadMedia(mediaFiles, i);
             downloadedFiles.push(...downloadedPaths);
 
-            // Directly interact with the file input
             const fileInput = await page.$('input.upload-input[type="file"]');
             if (fileInput) {
-              // Make the input visible and enable multiple uploads if not already
               await page.evaluate((input) => {
-                input.classList.remove("d-none"); // Remove 'display: none'
-                input.style.display = "block"; // Ensure it’s visible
-                input.setAttribute("multiple", ""); // Ensure multiple files can be uploaded
+                input.classList.remove("d-none");
+                input.style.display = "block";
+                input.setAttribute("multiple", "");
               }, fileInput);
 
-              // Upload all files at once (since input supports 'multiple')
               await fileInput.uploadFile(...downloadedPaths);
 
-              // Wait for all uploads to complete
               await page.waitForFunction(
                 () => !document.querySelector(".pending-image-template"),
-                { timeout: 30000 } // Increased timeout for multiple uploads
+                { timeout: 30000 }
               );
 
               console.log(
@@ -570,18 +581,15 @@ const uploadProducts = async () => {
         // Step 4: Add product properties
         async function handleProductProperties(page, specifications) {
           try {
-            // Navigate to the product properties page explicitly
             const currentUrl = page.url();
-            const slug = currentUrl.split("/").slice(-2, -1)[0]; // Extract slug from current URL
+            const slug = currentUrl.split("/").slice(-2, -1)[0];
             const propertiesUrl = `https://ibspot.com/admin/products/${slug}/product_properties`;
             await page.goto(propertiesUrl, { waitUntil: "networkidle2" });
 
-            // Wait for the product properties table to load
             await page.waitForSelector("#product_properties", {
               timeout: 10000,
             });
 
-            // Remove all existing properties with automatic alert handling
             const deleteButtons = await page.$$(
               "#product_properties .btn-danger.delete-resource"
             );
@@ -592,17 +600,13 @@ const uploadProducts = async () => {
             if (deleteButtons.length > 0) {
               for (const button of deleteButtons) {
                 try {
-                  // Prepare to handle the alert
                   page.once("dialog", async (dialog) => {
                     console.log(`Alert message: ${dialog.message()}`);
-                    await dialog.accept(); // Automatically click "OK" on the alert
+                    await dialog.accept();
                     console.log("Confirmed property deletion via alert");
                   });
 
-                  // Click delete button
                   await button.click();
-
-                  // Wait for the property to be removed
                   await delay(1000);
                 } catch (deleteError) {
                   console.error(
@@ -615,27 +619,22 @@ const uploadProducts = async () => {
               console.log("No existing properties found to delete");
             }
 
-            // Wait for deletions to process
             await page.waitForTimeout(2000);
 
-            // Add new properties from specifications (array format)
             if (Array.isArray(specifications) && specifications.length > 0) {
               const addButtonSelector =
                 'a.btn-success.spree_add_fields[data-target="tbody#sortVert"]';
               await page.waitForSelector(addButtonSelector, { timeout: 5000 });
 
               for (const spec of specifications) {
-                if (!spec.name || !spec.value) continue; // Skip invalid specs
+                if (!spec.name || !spec.value) continue;
 
-                // Click the Add Product Properties button
                 await page.click(addButtonSelector);
-                await page.waitForTimeout(1000); // Wait for new row to appear
+                await page.waitForTimeout(1000);
 
-                // Find the last row (newly added)
                 const rows = await page.$$("#product_properties tbody tr");
                 const newRow = rows[rows.length - 1];
 
-                // Fill in property name
                 const nameInput = await newRow.$(
                   "input.autocomplete.form-control"
                 );
@@ -644,7 +643,6 @@ const uploadProducts = async () => {
                   await nameInput.type(String(spec.name));
                 }
 
-                // Fill in property value
                 const valueInput = await newRow.$(
                   "input.form-control:not(.autocomplete)"
                 );
@@ -653,7 +651,6 @@ const uploadProducts = async () => {
                   await valueInput.type(String(spec.value));
                 }
 
-                // Ensure show_property checkbox is checked
                 const checkbox = await newRow.$('input[type="checkbox"]');
                 if (checkbox) {
                   const isChecked = await page.evaluate(
@@ -665,10 +662,9 @@ const uploadProducts = async () => {
                   }
                 }
 
-                await page.waitForTimeout(500); // Small delay between additions
+                await page.waitForTimeout(500);
               }
 
-              // Save changes
               const saveButton = await page.$(
                 'button.btn.btn-success[type="submit"]'
               );
@@ -683,7 +679,7 @@ const uploadProducts = async () => {
             console.log("Product properties updated successfully");
           } catch (error) {
             console.error("Error handling product properties:", error);
-            throw error; // Let the caller handle the error
+            throw error;
           }
         }
 
@@ -727,8 +723,45 @@ const uploadProducts = async () => {
         );
       }
     }
+
+    await page.close();
   } catch (error) {
-    console.error(`Critical error: ${error.message}`);
+    console.error(`Critical error in uploadProducts: ${error.message}`);
+  }
+};
+
+// Main loop to process multiple inputs
+const main = async () => {
+  console.log("Starting product processing...");
+
+  const exchangeRate = await getExchangeRate();
+  const inputs = await getMultipleInputs();
+  readline.close();
+
+  let browser;
+  try {
+    browser = await puppeteer.launch({
+      headless: false,
+      args: ["--no-sandbox", "--start-maximized"],
+      defaultViewport: null,
+    });
+
+    for (const [index, input] of inputs.entries()) {
+      console.log(
+        `\nProcessing input ${index + 1}/${inputs.length}: Path = ${
+          input.path
+        }, Category = ${input.category}`
+      );
+      await uploadProducts(
+        input.path,
+        input.isTestMode,
+        input.category,
+        exchangeRate,
+        browser
+      );
+    }
+  } catch (error) {
+    console.error(`Main loop error: ${error.message}`);
   } finally {
     if (browser) await browser.close();
     console.log("Browser closed");
@@ -736,5 +769,4 @@ const uploadProducts = async () => {
 };
 
 // Start the process
-console.log("Starting product processing...");
-uploadProducts();
+main();
