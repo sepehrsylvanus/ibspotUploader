@@ -6,6 +6,7 @@ const readline = require("readline").createInterface({
   output: process.stdout,
 });
 const axios = require("axios");
+const path = require("path");
 
 // Utility function to delay execution
 const delay = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
@@ -19,24 +20,24 @@ const generateSlugFromTitleAndSku = (title, sku) => {
     ı: "i",
     ö: "o",
     ç: "c",
-    Ğ: "g",
-    Ü: "u",
-    Ş: "s",
-    İ: "i",
-    Ö: "o",
-    Ç: "c",
+    Ğ: "G",
+    Ü: "U",
+    Ş: "S",
+    İ: "I",
+    Ö: "O",
+    Ç: "C",
   };
 
   const titlePart = title
-    .replace(/[ğüşıöçĞÜŞİÖÇ]/g, (match) => turkishToLatin[match]) // Transliterate Turkish characters
-    .toLowerCase() // Convert to lowercase
-    .replace(/%100/g, "100") // Convert %100 to 100
-    .replace(/[^a-z0-9]+/g, "-") // Replace non-alphanumeric with hyphen
-    .replace(/\s+/g, "-") // Replace spaces with hyphen
-    .replace(/-+/g, "-") // Replace multiple hyphens with single hyphen
-    .replace(/(^-|-$)/g, ""); // Remove leading/trailing hyphens
+    .replace(/[ğüşıöçĞÜŞİÖÇ]/g, (match) => turkishToLatin[match])
+    .toLowerCase()
+    .replace(/%100/g, "100")
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/\s+/g, "-")
+    .replace(/-+/g, "-")
+    .replace(/(^-|-$)/g, "");
 
-  return `${titlePart}`; // Append SKU with hyphen
+  return `${titlePart}`;
 };
 
 // Prompt user for USD exchange rate
@@ -70,11 +71,11 @@ const getJsonPath = () =>
   new Promise((resolve) => {
     readline.question(
       "Enter path to products.json (or Enter for test mode): ",
-      (path) => {
-        const trimmedPath = path.trim().replace(/^"|"$/g, "");
+      (pathInput) => {
+        const trimmedPath = pathInput.trim().replace(/^"|"$/g, "");
         if (!trimmedPath) {
           console.log("Entering test mode.");
-          const testPath = "./test_products.json";
+          const testPath = path.join(__dirname, "test_products.json");
           fsPromises.writeFile(
             testPath,
             JSON.stringify([generateTestProduct(0, 1.0)], null, 2)
@@ -343,9 +344,35 @@ const getMultipleInputs = async () => {
   return inputs;
 };
 
-// Main product upload function
+// Write or update report for a single product
+const writeProductReport = async (reportPath, fileName, productReport) => {
+  try {
+    // Ensure the directory exists
+    const reportDir = path.dirname(reportPath);
+    await fsPromises.mkdir(reportDir, { recursive: true });
+
+    let report;
+    // Check if report file exists
+    if (fs.existsSync(reportPath)) {
+      const existingData = await fsPromises.readFile(reportPath, "utf8");
+      report = JSON.parse(existingData);
+      report.products.push(productReport);
+    } else {
+      report = {
+        name: fileName,
+        products: [productReport],
+      };
+    }
+    await fsPromises.writeFile(reportPath, JSON.stringify(report, null, 2));
+    console.log(`Updated report at: ${reportPath}`);
+  } catch (error) {
+    console.error(`Error writing report: ${error.message}`);
+  }
+};
+
+// Main product upload function with report generation
 const uploadProducts = async (
-  path,
+  pathInput,
   isTestMode,
   predefinedCategory,
   exchangeRate,
@@ -358,9 +385,18 @@ const uploadProducts = async (
     newProductUrl: "https://ibspot.com/admin/products/new",
   };
 
+  // Properly extract filename and construct report path
+  const fileName = path.basename(pathInput, path.extname(pathInput)); // Get filename without extension
+  const sanitizedFileName = fileName.replace(/[^a-zA-Z0-9_-]/g, "_"); // Remove invalid characters
+  const reportPath = path.join(
+    __dirname,
+    "reports",
+    `upload_report_${sanitizedFileName}_${Date.now()}.json`
+  );
+
   try {
-    const products = await getProducts(path, isTestMode, exchangeRate);
-    console.log(`Processing ${products.length} products from ${path}`);
+    const products = await getProducts(pathInput, isTestMode, exchangeRate);
+    console.log(`Processing ${products.length} products from ${pathInput}`);
 
     const page = await browser.newPage();
     await page.setViewport({ width: 1920, height: 1080 });
@@ -384,7 +420,9 @@ const uploadProducts = async (
       );
       const downloadedFiles = [];
       let slug;
-      const productSku = `${product.productId}_Trendyol_TR_FWD`; // Define SKU here
+      const productSku = `${product.productId}_Trendyol_TR_FWD`;
+      let editUrl;
+      let status = "upload"; // Default status
 
       try {
         // Step 1: Go to new product page and enter basic details
@@ -420,21 +458,18 @@ const uploadProducts = async (
           .catch(() => false);
         if (skuError) {
           console.log(`SKU already taken for ${product.title}.`);
+          status = "update"; // Change status to update for existing products
           slug = generateSlugFromTitleAndSku(product.title, productSku);
           console.log(`Generated slug from title and SKU: ${slug}`);
-          const editUrlFromTitle = `https://ibspot.com/admin/products/${slug}/edit`;
-          console.log(`Navigating to edit URL: ${editUrlFromTitle}`);
-          await navigateWithRetry(page, editUrlFromTitle);
+          editUrl = `https://ibspot.com/admin/products/${slug}/edit`;
+          await navigateWithRetry(page, editUrl);
         } else {
           slug = await getSlug(page);
+          editUrl = `https://ibspot.com/admin/products/${slug}/edit`;
         }
 
         // Step 2: Go to edit page and add taxon
         try {
-          const editUrl = `https://ibspot.com/admin/products/${generateSlugFromTitleAndSku(
-            product.title,
-            productSku
-          )}/edit`;
           if (!skuError) {
             await navigateWithRetry(page, editUrl);
           }
@@ -711,7 +746,17 @@ const uploadProducts = async (
         console.error(
           `Critical error processing ${product.title}: ${error.message}`
         );
+        status = "error"; // Set status to error if processing fails
       } finally {
+        // Create product report entry and write/update report file
+        const productReport = {
+          sourceURL: product.sourceUrl,
+          ibspotURL: editUrl || "Error: Product creation failed",
+          status: status,
+        };
+        await writeProductReport(reportPath, fileName, productReport);
+
+        // Clean up downloaded files
         await Promise.all(
           downloadedFiles.map((path) =>
             fsPromises
@@ -727,6 +772,7 @@ const uploadProducts = async (
     await page.close();
   } catch (error) {
     console.error(`Critical error in uploadProducts: ${error.message}`);
+    throw error;
   }
 };
 
