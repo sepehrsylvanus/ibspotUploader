@@ -386,8 +386,8 @@ const uploadProducts = async (
   };
 
   // Properly extract filename and construct report path
-  const fileName = path.basename(pathInput, path.extname(pathInput)); // Get filename without extension
-  const sanitizedFileName = fileName.replace(/[^a-zA-Z0-9_-]/g, "_"); // Remove invalid characters
+  const fileName = path.basename(pathInput, path.extname(pathInput));
+  const sanitizedFileName = fileName.replace(/[^a-zA-Z0-9_-]/g, "_");
   const reportPath = path.join(
     __dirname,
     "reports",
@@ -422,7 +422,7 @@ const uploadProducts = async (
       let slug;
       const productSku = `${product.productId}_Trendyol_TR_FWD`;
       let editUrl;
-      let status = "upload"; // Default status
+      let status = "upload";
 
       try {
         // Step 1: Go to new product page and enter basic details
@@ -458,7 +458,7 @@ const uploadProducts = async (
           .catch(() => false);
         if (skuError) {
           console.log(`SKU already taken for ${product.title}.`);
-          status = "update"; // Change status to update for existing products
+          status = "update";
           slug = generateSlugFromTitleAndSku(product.title, productSku);
           console.log(`Generated slug from title and SKU: ${slug}`);
           editUrl = `https://ibspot.com/admin/products/${slug}/edit`;
@@ -746,10 +746,11 @@ const uploadProducts = async (
         console.error(
           `Critical error processing ${product.title}: ${error.message}`
         );
-        status = "error"; // Set status to error if processing fails
+        status = "error";
       } finally {
-        // Create product report entry and write/update report file
+        // Create product report entry with product name and write/update report file
         const productReport = {
+          productName: product.title,
           sourceURL: product.sourceUrl,
           ibspotURL: editUrl || "Error: Product creation failed",
           status: status,
