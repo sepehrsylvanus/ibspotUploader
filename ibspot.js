@@ -53,15 +53,34 @@ const getExchangeRate = () =>
     );
   });
 
-// Prompt user for category
+// Prompt user for category with bracket support
 const getCategory = () =>
   new Promise((resolve) => {
     readline.question(
-      "Enter the category to search in taxons (or press Enter for default): ",
+      "Enter the category to search in taxons (or press Enter for default; use [part1 part2] for hierarchical taxon): ",
       (category) => {
         const trimmedCategory = category.trim();
-        console.log(`Using category: ${trimmedCategory || "Default Category"}`);
-        resolve(trimmedCategory || "Saç Fırçası ve Tarak");
+        if (!trimmedCategory) {
+          console.log("Using default category: Saç Fırçası ve Tarak");
+          resolve("Saç Fırçası ve Tarak");
+        } else if (
+          trimmedCategory.startsWith("[") &&
+          trimmedCategory.endsWith("]")
+        ) {
+          const taxonParts = trimmedCategory.slice(1, -1).trim().split(/\s+/);
+          if (taxonParts.length >= 2) {
+            console.log(`Using hierarchical taxon: ${taxonParts.join(" -> ")}`);
+            resolve({ isHierarchical: true, parts: taxonParts });
+          } else {
+            console.log(
+              `Invalid hierarchical taxon format, using as normal: ${taxonParts[0]}`
+            );
+            resolve(taxonParts[0]);
+          }
+        } else {
+          console.log(`Using category: ${trimmedCategory}`);
+          resolve(trimmedCategory);
+        }
       }
     );
   });
@@ -216,53 +235,97 @@ const setDate = async (page, selector, date) => {
   );
 };
 
-// Select taxon in Select2 dropdown
-const selectTaxon = async (page, predefinedCategory) => {
+// Select taxon in Select2 dropdown with direct Puppeteer click
+const selectTaxon = async (page, categoryInput) => {
   try {
     await page.waitForSelector("#product_taxon_ids", { timeout: 5000 });
     await page.click(".select2-selection--multiple");
     await delay(500);
 
-    console.log(`Attempting to select taxon: ${predefinedCategory}`);
+    let searchTerm;
+    let isHierarchical = false;
+    let hierarchicalParts = [];
+
+    if (typeof categoryInput === "object" && categoryInput.isHierarchical) {
+      isHierarchical = true;
+      hierarchicalParts = categoryInput.parts; // e.g., ["Makeup", "Eyes"]
+      searchTerm = hierarchicalParts[1]; // Search with second part, e.g., "Eyes"
+      console.log(`Searching taxons with: ${searchTerm}`);
+    } else {
+      searchTerm = categoryInput;
+      console.log(`Attempting to select taxon: ${searchTerm}`);
+    }
 
     await page.evaluate(() => {
       const searchField = document.querySelector(".select2-search__field");
       searchField.value = "";
       searchField.focus();
     });
-    await page.type(".select2-search__field", predefinedCategory);
-    await delay(500);
+    await page.type(".select2-search__field", searchTerm);
+    await delay(1000); // Ensure options load
 
     const availableTaxons = await page.evaluate(() =>
       Array.from(document.querySelectorAll(".select2-results__option")).map(
         (opt) => opt.textContent.trim()
       )
     );
-    console.log(`Available taxons: ${availableTaxons}`);
+    console.log(`Available taxons after search: ${availableTaxons}`);
 
-    const matchingTaxon = availableTaxons.find(
-      (taxon) =>
-        taxon === predefinedCategory || taxon.includes(predefinedCategory)
-    );
+    let matchingTaxon;
+
+    if (isHierarchical) {
+      matchingTaxon = availableTaxons.find((taxon) => {
+        const taxonParts = taxon.split(" -> ");
+        if (taxonParts.length < 2) return false;
+        const penultimatePart = taxonParts[taxonParts.length - 2];
+        return penultimatePart === hierarchicalParts[0];
+      });
+    } else {
+      matchingTaxon = availableTaxons.find(
+        (taxon) => taxon === searchTerm || taxon.includes(searchTerm)
+      );
+    }
+
     if (matchingTaxon) {
-      await page.evaluate((taxon) => {
-        const option = Array.from(
-          document.querySelectorAll(".select2-results__option")
-        ).find((opt) => opt.textContent.trim() === taxon);
-        if (option) option.click();
-      }, matchingTaxon);
+      console.log(`Attempting to select: ${matchingTaxon}`);
+
+      // Find and click the option using Puppeteer
+      const optionSelector = `.select2-results__option:contains("${matchingTaxon}")`;
+      const options = await page.$$(".select2-results__option");
+      let clicked = false;
+
+      for (const option of options) {
+        const text = await page.evaluate((el) => el.textContent.trim(), option);
+        if (text === matchingTaxon) {
+          await option.scrollIntoView();
+          await option.click();
+          console.log(`Clicked option: ${matchingTaxon}`);
+          clicked = true;
+          break;
+        }
+      }
+
+      if (!clicked) {
+        console.log(`Failed to find and click "${matchingTaxon}" in DOM`);
+        await page.keyboard.press("Enter"); // Fallback
+      }
     } else {
       console.log(
-        `Taxon "${predefinedCategory}" not found. Pressing Enter to create/select.`
+        `Taxon matching criteria not found for "${searchTerm}". Pressing Enter to create/select.`
       );
       await page.keyboard.press("Enter");
     }
 
-    await delay(300);
-    const selectedTaxon = await page.evaluate(() =>
-      document.querySelector(".select2-selection__choice")?.textContent.trim()
-    );
-    console.log(`Selected taxon: ${selectedTaxon || "None"}`);
+    await delay(1500); // Wait for selection to register
+    const selectedTaxon = await page.evaluate(() => {
+      const choices = document.querySelectorAll(".select2-selection__choice");
+      return choices.length > 0
+        ? Array.from(choices)
+            .map((choice) => choice.textContent.trim())
+            .join(", ")
+        : "None";
+    });
+    console.log(`Final selected taxon: ${selectedTaxon}`);
     return true;
   } catch (error) {
     console.log(`Error selecting taxon: ${error.message}`);
@@ -347,12 +410,10 @@ const getMultipleInputs = async () => {
 // Write or update report for a single product
 const writeProductReport = async (reportPath, fileName, productReport) => {
   try {
-    // Ensure the directory exists
     const reportDir = path.dirname(reportPath);
     await fsPromises.mkdir(reportDir, { recursive: true });
 
     let report;
-    // Check if report file exists
     if (fs.existsSync(reportPath)) {
       const existingData = await fsPromises.readFile(reportPath, "utf8");
       report = JSON.parse(existingData);
@@ -385,7 +446,6 @@ const uploadProducts = async (
     newProductUrl: "https://ibspot.com/admin/products/new",
   };
 
-  // Properly extract filename and construct report path
   const fileName = path.basename(pathInput, path.extname(pathInput));
   const sanitizedFileName = fileName.replace(/[^a-zA-Z0-9_-]/g, "_");
   const reportPath = path.join(
@@ -401,7 +461,6 @@ const uploadProducts = async (
     const page = await browser.newPage();
     await page.setViewport({ width: 1920, height: 1080 });
 
-    // Login (only on the first run or if browser is restarted)
     if (!(await page.url().includes("ibspot.com/admin"))) {
       await navigateWithRetry(page, config.loginUrl);
       await page.type("#spree_user_email", config.email);
@@ -425,7 +484,6 @@ const uploadProducts = async (
       let status = "upload";
 
       try {
-        // Step 1: Go to new product page and enter basic details
         await navigateWithRetry(page, config.newProductUrl);
         await page.waitForSelector("#product_name", { timeout: 15000 });
 
@@ -450,7 +508,6 @@ const uploadProducts = async (
           page.waitForNavigation({ waitUntil: "networkidle2" }),
         ]);
 
-        // Check for SKU error
         const skuError = await page
           .$eval("#errorExplanation", (el) =>
             el?.textContent.includes("Sku has already been taken")
@@ -468,7 +525,6 @@ const uploadProducts = async (
           editUrl = `https://ibspot.com/admin/products/${slug}/edit`;
         }
 
-        // Step 2: Go to edit page and add taxon
         try {
           if (!skuError) {
             await navigateWithRetry(page, editUrl);
@@ -521,7 +577,6 @@ const uploadProducts = async (
           );
         }
 
-        // Step 3: Upload images
         try {
           const imagesUrl = `https://ibspot.com/admin/products/${generateSlugFromTitleAndSku(
             product.title,
@@ -613,7 +668,6 @@ const uploadProducts = async (
           );
         }
 
-        // Step 4: Add product properties
         async function handleProductProperties(page, specifications) {
           try {
             const currentUrl = page.url();
@@ -726,7 +780,6 @@ const uploadProducts = async (
           );
         }
 
-        // Step 5: Set stock with delay
         const stockUrl = `https://ibspot.com/admin/products/${generateSlugFromTitleAndSku(
           product.title,
           productSku
@@ -748,7 +801,6 @@ const uploadProducts = async (
         );
         status = "error";
       } finally {
-        // Create product report entry with product name and write/update report file
         const productReport = {
           productName: product.title,
           sourceURL: product.sourceUrl,
@@ -757,7 +809,6 @@ const uploadProducts = async (
         };
         await writeProductReport(reportPath, fileName, productReport);
 
-        // Clean up downloaded files
         await Promise.all(
           downloadedFiles.map((path) =>
             fsPromises
@@ -797,7 +848,7 @@ const main = async () => {
       console.log(
         `\nProcessing input ${index + 1}/${inputs.length}: Path = ${
           input.path
-        }, Category = ${input.category}`
+        }, Category = ${JSON.stringify(input.category)}`
       );
       await uploadProducts(
         input.path,
