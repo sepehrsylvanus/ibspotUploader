@@ -503,6 +503,16 @@ const uploadProducts = async (
           ]);
         }
 
+        if (!(await page.url().includes("ibspot.com/admin"))) {
+          await navigateWithRetry(page, config.loginUrl);
+          await page.type("#spree_user_email", config.email);
+          await page.type("#spree_user_password", config.password);
+          await Promise.all([
+            page.click('input[type="submit"]'),
+            page.waitForNavigation(),
+          ]);
+        }
+
         await navigateWithRetry(page, config.newProductUrl);
         await page.waitForSelector("#product_name", { timeout: 15000 });
 
@@ -562,6 +572,17 @@ const uploadProducts = async (
         await page.type("#product_source_url", product.sourceUrl);
         await page.select("#product_tax_category_id", "1");
         await selectTaxon(page, predefinedCategory);
+        await setDate(
+          page,
+          ".flatpickr-alt-input",
+          new Date(Date.now() - 2 * 86400000).toISOString().split("T")[0]
+        );
+        await page.type("#product_compare_at_price", product.price);
+        await page.type("#product_cost_price", product.costPrice);
+        await page.type("#product_main_brand", product.brand);
+        await page.type("#product_source_url", product.sourceUrl);
+        await page.select("#product_tax_category_id", "1");
+        await selectTaxon(page, predefinedCategory);
 
         const frame = await (
           await page.$("#cke_product_description iframe")
@@ -579,7 +600,22 @@ const uploadProducts = async (
           );
           if (checkbox && !checkbox.checked) checkbox.click();
         });
+        await page.evaluate(() => {
+          const checkbox = Array.from(
+            document.querySelectorAll('input[type="checkbox"]')
+          ).find(
+            (el) => el.nextElementSibling?.textContent?.trim() === "Sync To Gmc"
+          );
+          if (checkbox && !checkbox.checked) checkbox.click();
+        });
 
+        await page.evaluate(() =>
+          window.scrollTo(0, document.body.scrollHeight)
+        );
+        await Promise.all([
+          page.click('button.btn.btn-success[type="submit"]'),
+          page.waitForNavigation({ waitUntil: "networkidle2" }),
+        ]);
         await page.evaluate(() =>
           window.scrollTo(0, document.body.scrollHeight)
         );
@@ -616,6 +652,16 @@ const uploadProducts = async (
           });
           const downloadedPaths = await downloadMedia(mediaFiles, i);
           downloadedFiles.push(...downloadedPaths);
+        const mediaFiles = product.images
+          .split(";")
+          .map((url) => url.trim())
+          .filter(Boolean);
+        if (mediaFiles.length) {
+          await page.waitForSelector('input.upload-input[type="file"]', {
+            timeout: 5000,
+          });
+          const downloadedPaths = await downloadMedia(mediaFiles, i);
+          downloadedFiles.push(...downloadedPaths);
 
           const fileInput = await page.$('input.upload-input[type="file"]');
           if (fileInput) {
@@ -639,7 +685,48 @@ const uploadProducts = async (
         );
         const propertiesUrl = `https://ibspot.com/admin/products/${slugForProperties}/product_properties`;
         await navigateWithRetry(page, propertiesUrl);
+          const fileInput = await page.$('input.upload-input[type="file"]');
+          if (fileInput) {
+            await page.evaluate((input) => {
+              input.classList.remove("d-none");
+              input.style.display = "block";
+              input.setAttribute("multiple", "");
+            }, fileInput);
+            await fileInput.uploadFile(...downloadedPaths);
+            await page.waitForFunction(
+              () => !document.querySelector(".pending-image-template"),
+              { timeout: 30000 }
+            );
+            console.log(`Uploaded ${downloadedPaths.length} images`);
+          }
+        }
 
+        const slugForProperties = generateSlugFromTitleAndSku(
+          product.title,
+          productSku
+        );
+        const propertiesUrl = `https://ibspot.com/admin/products/${slugForProperties}/product_properties`;
+        await navigateWithRetry(page, propertiesUrl);
+
+        const propDeleteButtons = await page.$$(
+          "#product_properties .btn-danger.delete-resource"
+        );
+        if (propDeleteButtons.length > 0) {
+          for (const button of propDeleteButtons) {
+            page.once("dialog", async (dialog) => await dialog.accept());
+            await button.click();
+            await delay(1000);
+          }
+          console.log("All existing properties deleted");
+        }
+
+        if (
+          Array.isArray(product.specifications) &&
+          product.specifications.length > 0
+        ) {
+          const addButtonSelector =
+            'a.btn-success.spree_add_fields[data-target="tbody#sortVert"]';
+          await page.waitForSelector(addButtonSelector, { timeout: 5000 });
         const propDeleteButtons = await page.$$(
           "#product_properties .btn-danger.delete-resource"
         );
