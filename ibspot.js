@@ -515,6 +515,8 @@ const uploadProducts = async (
           parseFloat(product.masterPrice).toFixed(2)
         );
         await page.type("#product_sku", productSku);
+        await page.type("#product_source_url", product.sourceUrl);
+
         await page.select("#product_prototype_id", "1");
         await setDate(
           page,
