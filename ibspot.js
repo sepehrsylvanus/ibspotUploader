@@ -10,6 +10,18 @@ const path = require("path");
 
 // Utility function to delay execution
 const delay = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+const ensureLoggedIn = async (page, config) => {
+  if (!page.url().includes("/admin/products")) {
+    console.log("⚠️ Session expired. Logging in again...");
+    await navigateWithRetry(page, config.loginUrl);
+    await page.type("#spree_user_email", config.email);
+    await page.type("#spree_user_password", config.password);
+    await Promise.all([
+      page.click('input[type="submit"]'),
+      page.waitForNavigation(),
+    ]);
+  }
+};
 
 // Enhanced slug generation function combining title and SKU
 const generateSlugFromTitleAndSku = (title, sku) => {
@@ -493,14 +505,17 @@ const uploadProducts = async (
       let status = "upload";
 
       try {
-        if (!(await page.url().includes("ibspot.com/admin"))) {
-          await navigateWithRetry(page, config.loginUrl);
+        await navigateWithRetry(page, config.newProductUrl);
+
+        if (page.url().includes("/admin/login")) {
+          console.log("⚠️ Not logged in. Logging in...");
           await page.type("#spree_user_email", config.email);
           await page.type("#spree_user_password", config.password);
           await Promise.all([
             page.click('input[type="submit"]'),
-            page.waitForNavigation(),
+            page.waitForNavigation({ waitUntil: "networkidle2" }),
           ]);
+          await navigateWithRetry(page, config.newProductUrl);
         }
 
         await navigateWithRetry(page, config.newProductUrl);
@@ -620,18 +635,37 @@ const uploadProducts = async (
           downloadedFiles.push(...downloadedPaths);
 
           const fileInput = await page.$('input.upload-input[type="file"]');
-          if (fileInput) {
-            await page.evaluate((input) => {
-              input.classList.remove("d-none");
-              input.style.display = "block";
-              input.setAttribute("multiple", "");
-            }, fileInput);
-            await fileInput.uploadFile(...downloadedPaths);
-            await page.waitForFunction(
-              () => !document.querySelector(".pending-image-template"),
-              { timeout: 30000 }
-            );
-            console.log(`Uploaded ${downloadedPaths.length} images`);
+          if (fileInput && downloadedPaths.length > 0) {
+            try {
+              await page.evaluate((input) => {
+                input.classList.remove("d-none");
+                input.style.display = "block";
+                input.setAttribute("multiple", "");
+              }, fileInput);
+
+              await fileInput.uploadFile(...downloadedPaths);
+
+              try {
+                await page.waitForFunction(
+                  () => !document.querySelector(".pending-image-template"),
+                  { timeout: 30000 }
+                );
+              } catch (e) {
+                console.warn(
+                  "⚠️ Some images may not have uploaded correctly:",
+                  e.message
+                );
+              }
+
+              console.log(`Uploaded ${downloadedPaths.length} images`);
+            } catch (err) {
+              console.warn(
+                "⚠️ Skipping image upload due to error:",
+                err.message
+              );
+            }
+          } else {
+            console.log("⚠️ No valid image files to upload");
           }
         }
 
@@ -639,6 +673,7 @@ const uploadProducts = async (
           product.title,
           productSku
         );
+        console.log("🚀 ~ slugForProperties:", slugForProperties);
         const propertiesUrl = `https://ibspot.com/admin/products/${slugForProperties}/product_properties`;
         await navigateWithRetry(page, propertiesUrl);
 

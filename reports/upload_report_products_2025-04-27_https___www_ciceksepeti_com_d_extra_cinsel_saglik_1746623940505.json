@@ -1,0 +1,23 @@
+{
+  "name": "products_2025-04-27_https___www_ciceksepeti_com_d_extra_cinsel_saglik",
+  "products": [
+    {
+      "productName": "3 KUTU DELAY 48000 GECİKTİRİCİ SPREY, Yüksek Kalite Alman Menşei Delay Sprey- Aynı Gün Kargo Teslim",
+      "sourceURL": "https://www.ciceksepeti.com/4-kutu-delay-48000-geciktirici-sprey-100-orjinal-ithal-urun-kc7336996",
+      "ibspotURL": "https://ibspot.com/admin/products/3-kutu-delay-48000-geciktirici-sprey-yuksek-kalite-alman-mensei-delay-sprey-ayni-gun-kargo-teslim/edit",
+      "status": "update"
+    },
+    {
+      "productName": "Durex Intense 30'lı Uyarıcı Jelli ve Tırtıklı Prezervatif",
+      "sourceURL": "https://www.ciceksepeti.com/durex-intense-30li-uyarici-jelli-ve-tirtikli-prezervatif-kcm75185723",
+      "ibspotURL": "Error: Product creation failed",
+      "status": "error"
+    },
+    {
+      "productName": "1 KUTU TİTANGEL RED PENS BAKIM JELİ + 1 KUTU DELAY 48000 GECİKTİRİCİ SPREY YÜKSEK KALİTE %100 ORJİNAL",
+      "sourceURL": "https://www.ciceksepeti.com/1-kutu-titangel-red-pens-buyurucu-jel-1-kutu-delay-48000-geciktirici-sprey-kc6419602",
+      "ibspotURL": "Error: Product creation failed",
+      "status": "error"
+    }
+  ]
+}
