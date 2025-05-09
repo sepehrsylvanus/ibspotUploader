@@ -785,6 +785,14 @@ const main = async () => {
   const exchangeRate = await getExchangeRate();
   const inputs = await getMultipleInputs();
 
+  // Get the products from the first input just to prompt for index
+  let sampleProducts = await getProducts(
+    inputs[0].path,
+    inputs[0].isTestMode,
+    exchangeRate
+  );
+  const startIndex = await getStartIndex(sampleProducts.length);
+
   let browser;
   try {
     browser = await puppeteer.launch({
@@ -799,19 +807,13 @@ const main = async () => {
           input.path
         }, Category = ${JSON.stringify(input.category)}`
       );
-      const products = await getProducts(
-        input.path,
-        input.isTestMode,
-        exchangeRate
-      );
-      const startIndex = await getStartIndex(products.length);
       await uploadProducts(
         input.path,
         input.isTestMode,
         input.category,
         exchangeRate,
         browser,
-        startIndex
+        startIndex // 👈 use the same startIndex here
       );
     }
   } catch (error) {
