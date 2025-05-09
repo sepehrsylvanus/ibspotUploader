@@ -447,12 +447,19 @@ const writeProductReport = async (reportPath, fileName, productReport) => {
       const existingData = await fsPromises.readFile(reportPath, "utf8");
       report = JSON.parse(existingData);
       report.products.push(productReport);
+      if (["upload", "update"].includes(productReport.status)) {
+        report.totalUploaded = (report.totalUploaded || 0) + 1;
+      }
     } else {
       report = {
         name: fileName,
+        totalUploaded: ["upload", "update"].includes(productReport.status)
+          ? 1
+          : 0,
         products: [productReport],
       };
     }
+
     await fsPromises.writeFile(reportPath, JSON.stringify(report, null, 2));
     console.log(`Updated report at: ${reportPath}`);
   } catch (error) {
