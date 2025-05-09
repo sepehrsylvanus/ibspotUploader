@@ -281,8 +281,8 @@ const selectTaxon = async (page, categoryInput) => {
     if (typeof categoryInput === "object" && categoryInput.isHierarchical) {
       isHierarchical = true;
       hierarchicalParts = categoryInput.parts;
-      searchTerm = hierarchicalParts[1];
-      console.log(`Searching taxons with: ${searchTerm}`);
+      searchTerm = hierarchicalParts[hierarchicalParts.length - 1];
+      console.log(`Searching taxons with final part: ${searchTerm}`);
     } else {
       searchTerm = categoryInput;
       console.log(`Attempting to select taxon: ${searchTerm}`);
@@ -307,10 +307,13 @@ const selectTaxon = async (page, categoryInput) => {
 
     if (isHierarchical) {
       matchingTaxon = availableTaxons.find((taxon) => {
-        const taxonParts = taxon.split(" -> ");
-        if (taxonParts.length < 2) return false;
-        const penultimatePart = taxonParts[taxonParts.length - 2];
-        return penultimatePart === hierarchicalParts[0];
+        const taxonParts = taxon.split(" -> ").map((p) => p.trim());
+        if (taxonParts.length < hierarchicalParts.length) return false;
+
+        for (let i = 0; i < hierarchicalParts.length; i++) {
+          if (taxonParts[i] !== hierarchicalParts[i]) return false;
+        }
+        return true;
       });
     } else {
       matchingTaxon = availableTaxons.find(
