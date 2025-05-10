@@ -99,7 +99,11 @@ const getCategory = () =>
           trimmedCategory.startsWith("[") &&
           trimmedCategory.endsWith("]")
         ) {
-          const taxonParts = trimmedCategory.slice(1, -1).trim().split(/\s+/);
+          const taxonParts = trimmedCategory
+            .slice(1, -1)
+            .match(/"([^"]+)"|\S+/g)
+            .map((part) => part.replace(/(^"|"$)/g, ""));
+
           if (taxonParts.length >= 2) {
             console.log(`Using hierarchical taxon: ${taxonParts.join(" -> ")}`);
             resolve({ isHierarchical: true, parts: taxonParts });
