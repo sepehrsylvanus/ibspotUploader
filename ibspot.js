@@ -545,9 +545,10 @@ const uploadProducts = async (
         await page.select("#product_prototype_id", "1");
         await setDate(
           page,
-          ".flatpickr-alt-input",
-          new Date(Date.now() - 2 * 86400000).toISOString().split("T")[0]
+          "#product_available_on", // This is the actual hidden input that Flatpickr binds to
+          new Date(Date.now() + 2 * 86400000).toISOString().split("T")[0]
         );
+
         await page.select("#product_shipping_category_id", "5698");
         await Promise.all([
           page.click('button.btn.btn-success[type="submit"]'),
