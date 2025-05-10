@@ -366,6 +366,7 @@ const selectTaxon = async (page, categoryInput) => {
 };
 
 // Optimized download media function with concurrency
+
 const downloadMedia = async (urls, baseIndex) => {
   const downloadedFiles = [];
   const downloadPromises = urls.map(async (url, j) => {
@@ -374,27 +375,32 @@ const downloadMedia = async (urls, baseIndex) => {
       return null;
     }
 
-    const isVideo = url.endsWith(".mp4");
-    const path = isVideo
-      ? `./video_${baseIndex}_${j}.mp4`
-      : `./image_${baseIndex}_${j}.jpg`;
-
     try {
+      const extension = path.extname(new URL(url).pathname) || ".jpg"; // fallback
+      const filePath = `./image_${baseIndex}_${j}${extension}`;
+
       const response = await axios({
         url,
         method: "GET",
         responseType: "stream",
         timeout: 10000,
       });
+
+      if (response.status !== 200) {
+        console.warn(`Non-200 response for ${url}`);
+        return null;
+      }
+
       await new Promise((resolve, reject) => {
         response.data
-          .pipe(fs.createWriteStream(path))
-          .on("finish", () => resolve(path))
+          .pipe(fs.createWriteStream(filePath))
+          .on("finish", () => resolve(filePath))
           .on("error", reject);
       });
-      downloadedFiles.push(path);
-      console.log(`Downloaded ${url} to ${path}`);
-      return path;
+
+      downloadedFiles.push(filePath);
+      console.log(`Downloaded ${url} to ${filePath}`);
+      return filePath;
     } catch (error) {
       console.error(`Failed to download ${url}: ${error.message}`);
       return null;
@@ -404,7 +410,6 @@ const downloadMedia = async (urls, baseIndex) => {
   await Promise.all(downloadPromises);
   return downloadedFiles.filter(Boolean);
 };
-
 // Extract slug from URL
 const getSlug = async (page) => {
   await delay(1000);
@@ -581,8 +586,8 @@ const uploadProducts = async (
 
         await setDate(
           page,
-          ".flatpickr-alt-input",
-          new Date(Date.now() - 2 * 86400000).toISOString().split("T")[0]
+          "#product_available_on", // This is the actual hidden input that Flatpickr binds to
+          new Date(Date.now() + 2 * 86400000).toISOString().split("T")[0]
         );
         await page.type("#product_compare_at_price", product.price);
         await page.type("#product_cost_price", product.costPrice);
@@ -636,8 +641,10 @@ const uploadProducts = async (
 
         const mediaFiles = product.images
           .split(";")
+          .flatMap((url) => url.split(","))
           .map((url) => url.trim())
           .filter(Boolean);
+
         if (mediaFiles.length) {
           await page.waitForSelector('input.upload-input[type="file"]', {
             timeout: 5000,
