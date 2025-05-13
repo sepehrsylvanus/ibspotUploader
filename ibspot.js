@@ -22,6 +22,40 @@ const ensureLoggedIn = async (page, config) => {
     ]);
   }
 };
+const getSingleProductInput = async (exchangeRate) => {
+  return {
+    title: "Single Test Product",
+    productId: `SINGLE_${Date.now()}`,
+    usdPrice: "15.00",
+    masterPrice: (35 / exchangeRate).toFixed(2),
+    costPrice: (15 / exchangeRate).toFixed(2),
+    price: ((35 + Math.random() * 15 + 5) / exchangeRate).toFixed(2),
+    brand: "SINGLEBRAND",
+    sourceUrl: "https://example.com/single-product",
+    description: "<p>This is a single test product.</p>",
+    images: "https://example.com/single-image.jpg",
+    categories: "Test>Single",
+    specifications: [
+      { name: "Color", value: "Red" },
+      { name: "Size", value: "Medium" },
+    ],
+  };
+};
+
+const getUploadMode = () =>
+  new Promise((resolve) => {
+    readline.question(
+      "Choose upload mode:\n1 - Upload from JSON file\n2 - Upload a single product manually\nEnter choice (1 or 2): ",
+      (choice) => {
+        const selected = choice.trim();
+        if (selected === "2") {
+          resolve("single");
+        } else {
+          resolve("multiple");
+        }
+      }
+    );
+  });
 
 // Enhanced slug generation function combining title and SKU
 const generateSlugFromTitleAndSku = (title, sku) => {
@@ -803,19 +837,11 @@ const uploadProducts = async (
 // Main loop to process multiple inputs
 const main = async () => {
   console.log("Starting product processing...");
-
+  const uploadMode = await getUploadMode();
   const exchangeRate = await getExchangeRate();
-  const inputs = await getMultipleInputs();
-
-  // Get the products from the first input just to prompt for index
-  let sampleProducts = await getProducts(
-    inputs[0].path,
-    inputs[0].isTestMode,
-    exchangeRate
-  );
-  const startIndex = await getStartIndex(sampleProducts.length);
 
   let browser;
+
   try {
     browser = await puppeteer.launch({
       headless: false,
@@ -823,27 +849,57 @@ const main = async () => {
       defaultViewport: null,
     });
 
-    for (const [index, input] of inputs.entries()) {
-      console.log(
-        `\nProcessing input ${index + 1}/${inputs.length}: Path = ${
-          input.path
-        }, Category = ${JSON.stringify(input.category)}`
-      );
+    if (uploadMode === "single") {
+      const product = await getSingleProductInput(exchangeRate);
+      const category = await getCategory();
+      const pathInput = "manual_input";
+      const isTestMode = false;
+      const startIndex = 0;
+
+      const tempPath = path.join(__dirname, "temp_single_product.json");
+      await fsPromises.writeFile(tempPath, JSON.stringify([product], null, 2));
+
       await uploadProducts(
-        input.path,
-        input.isTestMode,
-        input.category,
+        tempPath,
+        isTestMode,
+        category,
         exchangeRate,
         browser,
-        startIndex // 👈 use the same startIndex here
+        startIndex
       );
+
+      await fsPromises.unlink(tempPath).catch(() => {});
+    } else {
+      const inputs = await getMultipleInputs();
+      let sampleProducts = await getProducts(
+        inputs[0].path,
+        inputs[0].isTestMode,
+        exchangeRate
+      );
+      const startIndex = await getStartIndex(sampleProducts.length);
+
+      for (const [index, input] of inputs.entries()) {
+        console.log(
+          `\nProcessing input ${index + 1}/${inputs.length}: Path = ${
+            input.path
+          }, Category = ${JSON.stringify(input.category)}`
+        );
+        await uploadProducts(
+          input.path,
+          input.isTestMode,
+          input.category,
+          exchangeRate,
+          browser,
+          startIndex
+        );
+      }
     }
   } catch (error) {
     console.error(`Main loop error: ${error.message}`);
   } finally {
     if (browser) await browser.close();
+    readline.close();
     console.log("Browser closed");
-    readline.close(); // Close readline only after everything is done
   }
 };
 
