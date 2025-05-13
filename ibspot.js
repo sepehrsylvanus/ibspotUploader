@@ -23,18 +23,31 @@ const ensureLoggedIn = async (page, config) => {
   }
 };
 const getSingleProductInput = async (exchangeRate) => {
+  const ask = (question) =>
+    new Promise((resolve) => readline.question(question, resolve));
+
+  const title = await ask("Product title: ");
+  const productId = await ask("Product ID (e.g., SKU): ");
+  const usdPriceStr = await ask("USD Price (e.g., 15.00): ");
+  const brand = await ask("Brand: ");
+  const sourceUrl = await ask("Source URL: ");
+  const description = await ask("Short description (HTML supported): ");
+  const images = await ask("Image URL(s) (use ; to separate): ");
+  const categories = await ask("Category path (e.g., Main>Sub): ");
+  const usdPrice = parseFloat(usdPriceStr.trim()) || 15;
+
   return {
-    title: "Single Test Product",
-    productId: `SINGLE_${Date.now()}`,
-    usdPrice: "15.00",
+    title,
+    productId,
+    usdPrice: usdPrice.toFixed(2),
     masterPrice: (35 / exchangeRate).toFixed(2),
-    costPrice: (15 / exchangeRate).toFixed(2),
+    costPrice: (usdPrice / exchangeRate).toFixed(2),
     price: ((35 + Math.random() * 15 + 5) / exchangeRate).toFixed(2),
-    brand: "SINGLEBRAND",
-    sourceUrl: "https://example.com/single-product",
-    description: "<p>This is a single test product.</p>",
-    images: "https://example.com/single-image.jpg",
-    categories: "Test>Single",
+    brand,
+    sourceUrl,
+    description,
+    images,
+    categories,
     specifications: [
       { name: "Color", value: "Red" },
       { name: "Size", value: "Medium" },
